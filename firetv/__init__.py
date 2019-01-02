@@ -135,12 +135,12 @@ class FireTV:
         # the methods used for sending ADB commands
         if not self.adb_server_ip:
             # python-adb
-            self._adb_shell = self._adb_shell_python_adb
-            self._adb_streaming_shell = self._adb_streaming_shell_python_adb
+            self.adb_shell = self._adb_shell_python_adb
+            self.adb_streaming_shell = self._adb_streaming_shell_python_adb
         else:
             # pure-python-adb
-            self._adb_shell = self._adb_shell_pure_python_adb
-            self._adb_streaming_shell = self._adb_streaming_shell_pure_python_adb
+            self.adb_shell = self._adb_shell_pure_python_adb
+            self.adb_streaming_shell = self._adb_streaming_shell_pure_python_adb
 
         # establish the ADB connection
         self.connect()
@@ -199,8 +199,8 @@ class FireTV:
         :returns: Dump, optionally grepped.
         """
         if grep:
-            return self._adb_shell('dumpsys {0} | grep "{1}"'.format(service, grep))
-        return self._adb_shell('dumpsys {0}'.format(service))
+            return self.adb_shell('dumpsys {0} | grep "{1}"'.format(service, grep))
+        return self.adb_shell('dumpsys {0}'.format(service))
 
     def _dump_has(self, service, grep, search):
         """Check if a dump has particular content.
@@ -222,7 +222,7 @@ class FireTV:
 
         :param key: Key constant.
         """
-        self._adb_shell('input keyevent {0}'.format(key))
+        self.adb_shell('input keyevent {0}'.format(key))
 
     def _ps(self, search=''):
         """Perform a ps command with optional filtering.
@@ -233,7 +233,7 @@ class FireTV:
         if not self.available:
             return
         result = []
-        ps = self._adb_streaming_shell('ps')
+        ps = self.adb_streaming_shell('ps')
         try:
             for bad_line in ps:
                 # The splitting of the StreamingShell doesn't always work
@@ -254,7 +254,7 @@ class FireTV:
 
         # adb shell outputs in weird format, so we cut it into lines,
         # separate the retcode and return info to the user
-        res = self._adb_shell(cmd)
+        res = self.adb_shell(cmd)
         if res is None:
             return {}
 
@@ -454,7 +454,7 @@ class FireTV:
 
     def get_properties(self):
         """Get the ``screen_on``, ``awake``, ``wake_lock``, and ``current_app`` properties."""
-        output = self._adb_shell(SCREEN_ON_CMD + " && " + AWAKE_CMD + " && " + WAKE_LOCK_CMD + " && " + CURRENT_APP_CMD)
+        output = self.adb_shell(SCREEN_ON_CMD + " && " + AWAKE_CMD + " && " + WAKE_LOCK_CMD + " && " + CURRENT_APP_CMD)
 
         if not output:
             return None, None, None, None
