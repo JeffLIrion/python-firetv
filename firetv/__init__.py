@@ -28,6 +28,12 @@ else:
 # Matches window windows output for app & activity name gathering
 WINDOW_REGEX = re.compile(r"Window\{(?P<id>.+?) (?P<user>.+) (?P<package>.+?)(?:\/(?P<activity>.+?))?\}$", re.MULTILINE)
 
+# ADB shell commands for getting the `screen_on`, `awake`, `wake_lock`, and `current_app` properties
+SCREEN_ON_CMD = r"dumpsys power | grep 'Display Power' | grep -q 'state=ON' && echo -e '1\c' || echo -e '0\c'"
+AWAKE_CMD = r"dumpsys power | grep mWakefulness | grep -q Awake && echo -e '1\c' || echo '0\c'"
+WAKE_LOCK_CMD = r"dumpsys power | grep Locks | grep -q 'size=0' && echo -e '1\c' || echo '0\c'"
+CURRENT_APP_CMD = "dumpsys window windows | grep mCurrentFocus"
+
 # ADB key event codes.
 HOME = 3
 VOLUME_UP = 24
@@ -414,7 +420,7 @@ class FireTV:
 
         # case 1: current app was successfully found
         if matches:
-            (pkg, activity) = matches.group('package', 'activity')
+            (pkg, activity) = matches.group("package", "activity")
             return {"package": pkg, "activity": activity}
 
         # case 2: current app could not be found
@@ -445,6 +451,31 @@ class FireTV:
     def settings(self):
         """Check if the active application is the Amazon menu."""
         return self.current_app["package"] == PACKAGE_SETTINGS
+
+    def get_properties(self):
+        """Get the ``screen_on``, ``awake``, ``wake_lock``, and ``current_app`` properties."""
+        output = self._adb_shell(SCREEN_ON_CMD + " && " + AWAKE_CMD + " && " + WAKE_LOCK_CMD + " && " + CURRENT_APP_CMD)
+
+        if not output:
+            return None, None, None, None
+
+        screen_on = output[0] == '1'
+        awake = output[1] == '1'
+        wake_lock = output[2] == '1'
+
+        if len(output) < 4:
+            return screen_on, awake, wake_lock, None
+
+        current_focus = output[3:].replace("\r", "")
+        matches = WINDOW_REGEX.search(current_focus)
+
+        # case 1: current app was successfully found
+        if matches:
+            (pkg, activity) = matches.group("package", "activity")
+            return screen_on, awake, wake_lock, {"package": pkg, "activity": activity}
+
+        # case 2: current app was not found
+        return screen_on, awake, wake_lock, None
 
     # ======================================================================= #
     #                                                                         #
