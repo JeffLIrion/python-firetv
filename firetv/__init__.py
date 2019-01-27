@@ -416,7 +416,7 @@ class FireTV:
     def turn_on(self):
         """ Send power action if device is off. """
         if not self.screen_on:
-            self.power()
+            self.home()
 
     def turn_off(self):
         """ Send power action if device is not off. """
