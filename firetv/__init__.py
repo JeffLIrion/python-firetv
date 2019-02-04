@@ -487,8 +487,7 @@ class FireTV:
     # ======================================================================= #
     def turn_on(self):
         """Send power action if device is off."""
-        if not self.screen_on:
-            self.home()
+        self.adb_shell("dumpsys power | grep 'Display Power' | grep -q 'state=ON' || (input keyevent {0} && input keyevent {1})".format(POWER, HOME))
 
     def turn_off(self):
         """Send power action if device is not off."""
