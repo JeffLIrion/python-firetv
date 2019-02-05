@@ -408,7 +408,7 @@ class FireTV:
         """Return an array of running user applications."""
         ps = self.adb_shell("ps | grep u0_a")
         if ps:
-            return [x.split()[-1] for x in ps.replace(r"\r\n", r"\n").split(r"\n") if x]
+            return [line.strip().rsplit(' ', 1)[-1] for line in ps.splitlines() if line.strip()]  
         return []
 
     @property
