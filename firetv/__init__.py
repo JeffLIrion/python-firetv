@@ -27,13 +27,15 @@ else:
 
 # Matches window windows output for app & activity name gathering
 WINDOW_REGEX = re.compile(r"Window\{(?P<id>.+?) (?P<user>.+) (?P<package>.+?)(?:\/(?P<activity>.+?))?\}$", re.MULTILINE)
+MEDIA_SESSION_STATE_REGEX = re.compile(r"state=(?P<state>[0-9]+)", re.MULTILINE)
 
 # ADB shell commands for getting the `screen_on`, `awake`, `wake_lock`,
-# `wake_lock_size`, `current_app`, and `running_apps` properties
+# `wake_lock_size`, `media_session_state`, `current_app`, and `running_apps` properties
 SCREEN_ON_CMD = "dumpsys power | grep 'Display Power' | grep -q 'state=ON'"
 AWAKE_CMD = "dumpsys power | grep mWakefulness | grep -q Awake"
 WAKE_LOCK_CMD = "dumpsys power | grep Locks | grep -q 'size=0'"
 WAKE_LOCK_SIZE_CMD = "dumpsys power | grep Locks | grep 'size='"
+MEDIA_SESSION_STATE_CMD = "dumpsys media_session | grep -m 1 'state=PlaybackState {'"
 CURRENT_APP_CMD = "dumpsys window windows | grep mCurrentFocus"
 RUNNING_APPS_CMD = "ps | grep u0_a"
 
@@ -44,6 +46,7 @@ SUCCESS1 = r" && echo -e '1\c' "
 SUCCESS1_FAILURE0 = r" && echo -e '1\c' || echo -e '0\c' "
 
 # ADB key event codes.
+# https://developer.android.com/reference/android/view/KeyEvent
 HOME = 3
 CENTER = 23
 VOLUME_UP = 24
@@ -119,7 +122,14 @@ STATE_OFF = 'off'
 STATE_PLAYING = 'playing'
 STATE_PAUSED = 'paused'
 STATE_STANDBY = 'standby'
+STATE_STOPPED = 'stopped'
 STATE_UNKNOWN = 'unknown'
+
+# https://developer.android.com/reference/android/media/session/PlaybackState.html
+MEDIA_SESSION_STATES = {0: None,
+                        1: STATE_STOPPED,
+                        2: STATE_PAUSED,
+                        3: STATE_PLAYING}
 
 # Apps.
 PACKAGE_LAUNCHER = "com.amazon.tv.launcher"
@@ -362,8 +372,8 @@ class FireTV:
         :return current_app: the current app
         :return running_apps: the running apps
         """
-        # The `screen_on`, `awake`, `wake_lock_size`, `current_app`, and `running_apps` properties.
-        screen_on, awake, wake_lock_size, _current_app, running_apps = self.get_properties(get_running_apps=get_running_apps, lazy=True)
+        # The `screen_on`, `awake`, `wake_lock_size`, `media_session_state`, `current_app`, and `running_apps` properties.
+        screen_on, awake, wake_lock_size, media_session_state, _current_app, running_apps = self.get_properties(get_running_apps=get_running_apps, lazy=True)
 
         # Check if device is off.
         if not screen_on:
@@ -403,10 +413,16 @@ class FireTV:
 
             # Netflix
             elif current_app == NETFLIX:
-                if wake_lock_size > 3:
+                if media_session_state == 2:
+                    state = STATE_PAUSED
+                elif media_session_state == 3:
                     state = STATE_PLAYING
                 else:
-                    state = STATE_PAUSED
+                    state = STATE_STANDBY
+                # if wake_lock_size > 3:
+                #     state = STATE_PLAYING
+                # else:
+                #    state = STATE_PAUSED
 
             # Check if `wake_lock_size` is 1 (device is playing).
             elif wake_lock_size == 1:
@@ -557,6 +573,18 @@ class FireTV:
         return int(output.split("=")[1].strip())
 
     @property
+    def media_session_state(self):
+        """Get the state the output of ``dumpsys media_session``."""
+        output = self.adb_shell(MEDIA_SESSION_STATE_CMD)
+        if not output:
+            return None
+
+        matches = MEDIA_SESSION_STATE_REGEX.search(output)
+        if matches:
+            return int(matches.group('state'))
+        return None
+
+    @property
     def launcher(self):
         """Check if the active application is the Amazon TV launcher."""
         return self.current_app["package"] == PACKAGE_LAUNCHER
@@ -567,45 +595,57 @@ class FireTV:
         return self.current_app["package"] == PACKAGE_SETTINGS
 
     def get_properties(self, get_running_apps=True, lazy=False):
-        """Get the ``screen_on``, ``awake``, ``wake_lock_size``, ``current_app``, and ``running_apps`` properties."""
+        """Get the ``screen_on``, ``awake``, ``wake_lock_size``, ``media_session_state``, ``current_app``, and ``running_apps`` properties."""
         if get_running_apps:
             output = self.adb_shell(SCREEN_ON_CMD + (SUCCESS1 if lazy else SUCCESS1_FAILURE0) + " && " +
                                     AWAKE_CMD + (SUCCESS1 if lazy else SUCCESS1_FAILURE0) + " && " +
-                                    WAKE_LOCK_SIZE_CMD + " && " +
+                                    WAKE_LOCK_SIZE_CMD + " && (" +
+                                    MEDIA_SESSION_STATE_CMD + " || echo) && " +
                                     CURRENT_APP_CMD + " && " +
                                     RUNNING_APPS_CMD)
         else:
             output = self.adb_shell(SCREEN_ON_CMD + (SUCCESS1 if lazy else SUCCESS1_FAILURE0) + " && " +
                                     AWAKE_CMD + (SUCCESS1 if lazy else SUCCESS1_FAILURE0) + " && " +
-                                    WAKE_LOCK_SIZE_CMD + " && " +
+                                    WAKE_LOCK_SIZE_CMD + " && (" +
+                                    MEDIA_SESSION_STATE_CMD + " || echo) && " +
                                     CURRENT_APP_CMD)
 
         # ADB command was unsuccessful
         if output is None:
-            return None, None, None, None, None
+            return None, None, None, None, None, None
 
         # `screen_on` property
         if not output:
-            return False, False, -1, None, None
+            return False, False, -1, None, None, None
         screen_on = output[0] == '1'
 
         # `awake` property
         if len(output) < 2:
-            return screen_on, False, -1, None, None
+            return screen_on, False, -1, None, None, None
         awake = output[1] == '1'
 
         lines = output.strip().splitlines()
 
         # `wake_lock_size` property
         if len(lines[0]) < 3:
-            return screen_on, awake, -1, None, None
+            return screen_on, awake, -1, None, None, None
         wake_lock_size = int(lines[0].split("=")[1].strip())
 
-        # `current_app` property
+        # `media_session_state` property
         if len(lines) < 2:
-            return screen_on, awake, wake_lock_size, None, None
+            return screen_on, awake, wake_lock_size, None, None, None
 
-        matches = WINDOW_REGEX.search(lines[1])
+        matches = MEDIA_SESSION_STATE_REGEX.search(lines[1])
+        if matches:
+            media_session_state = int(matches.group('state'))
+        else:
+            media_session_state = None
+
+        # `current_app` property
+        if len(lines) < 3:
+            return screen_on, awake, wake_lock_size, media_session_state, None, None
+
+        matches = WINDOW_REGEX.search(lines[2])
         if matches:
             # case 1: current app was successfully found
             (pkg, activity) = matches.group("package", "activity")
@@ -615,12 +655,12 @@ class FireTV:
             current_app = None
 
         # `running_apps` property
-        if not get_running_apps or len(lines) < 3:
-            return screen_on, awake, wake_lock_size, current_app, None
+        if not get_running_apps or len(lines) < 4:
+            return screen_on, awake, wake_lock_size, media_session_state, current_app, None
 
-        running_apps = [line.strip().rsplit(' ', 1)[-1] for line in lines[2:] if line.strip()]
+        running_apps = [line.strip().rsplit(' ', 1)[-1] for line in lines[3:] if line.strip()]
 
-        return screen_on, awake, wake_lock_size, current_app, running_apps
+        return screen_on, awake, wake_lock_size, media_session_state, current_app, running_apps
 
     # ======================================================================= #
     #                                                                         #
